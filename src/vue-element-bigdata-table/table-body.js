@@ -153,10 +153,10 @@ export default {
       const oldRow = rows[oldVal];
       const newRow = rows[newVal];
       if (oldRow) {
-        removeClass(oldRow, 'hover-row');
+        // removeClass(oldRow, 'hover-row');
       }
       if (newRow) {
-        addClass(newRow, 'hover-row');
+        // addClass(newRow, 'hover-row');
       }
     },
     'store.states.currentRow' (newVal, oldVal) {

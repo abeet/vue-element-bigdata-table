@@ -34,11 +34,9 @@
       ref="bodyWrapper"
       :class="[layout.scrollX ? `is-scrolling-${scrollPosition}` : 'is-scrolling-none']"
       :style="[bodyHeight]"
-       @DOMMouseScroll="handleScroll"
-       @scroll="handleScroll"
       >
       <div>
-        <div :style="{height: `${topPlaceholderHeight}px`}"></div>
+        <div class="el-table_placeholder" :style="{height: `${topPlaceholderHeight}px`}"></div>
         <render-dom :render="renderTable"
           :context="context"
           :store="store"
@@ -50,7 +48,7 @@
             width: layout.bodyWidth ? layout.bodyWidth + 'px' : ''
           }"
         ></render-dom>
-        <div :style="{height: `${bottomPlaceholderHeight}px`}"></div>
+        <div class="el-table_placeholder" :style="{height: `${bottomPlaceholderHeight}px`}"></div>
       </div>
       <div
         v-if="!data || data.length === 0"
@@ -227,7 +225,6 @@
 
 <script type="text/babel">
 import ElCheckbox from 'element-ui/packages/checkbox';
-import debounce from 'throttle-debounce/debounce';
 import {
   addResizeListener,
   removeResizeListener
@@ -243,7 +240,9 @@ import TableFooter from './table-footer';
 
 import dataHandle from './mixins/data-handle.js';
 import renderDom from './dom/renderDom.js';
-// console.log(renderDom)
+import { Loading } from 'element-ui'
+// import throttle from 'throttle-debounce/throttle'
+import debounce from 'throttle-debounce/debounce'
 
 let tableIdSeed = 1;
 
@@ -331,6 +330,19 @@ export default {
     rowHeight: {
       type: Number,
       default: 32
+    },
+    dataReadUrl: {
+      type: [String, Function],
+      default: ''
+    },
+    // 是否自动从dataReadUrl载入数据
+    autoGetData: {
+      type: Boolean,
+      default: true
+    },
+    currentPage: {
+      type: Number,
+      default: 1
     }
   },
 
@@ -386,21 +398,21 @@ export default {
     },
 
     handleFixedMousewheel (event, data) {
-      const bodyWrapper = this.bodyWrapper;
+      const scrollWrapper = this.scrollWrapper;
       if (Math.abs(data.spinY) > 0) {
-        const currentScrollTop = bodyWrapper.scrollTop;
+        const currentScrollTop = scrollWrapper.scrollTop;
         if (data.pixelY < 0 && currentScrollTop !== 0) {
           event.preventDefault();
         }
         if (
           data.pixelY > 0 &&
-          bodyWrapper.scrollHeight - bodyWrapper.clientHeight > currentScrollTop
+          scrollWrapper.scrollHeight - scrollWrapper.clientHeight > currentScrollTop
         ) {
           event.preventDefault();
         }
-        bodyWrapper.scrollTop += Math.ceil(data.pixelY / 5);
+        scrollWrapper.scrollTop += Math.ceil(data.pixelY / 5);
       } else {
-        bodyWrapper.scrollLeft += Math.ceil(data.pixelX / 5);
+        scrollWrapper.scrollLeft += Math.ceil(data.pixelX / 5);
       }
     },
 
@@ -408,7 +420,7 @@ export default {
       const { pixelX, pixelY } = data;
       if (Math.abs(pixelX) >= Math.abs(pixelY)) {
         event.preventDefault();
-        this.bodyWrapper.scrollLeft += data.pixelX / 5;
+        this.scrollWrapper.scrollLeft += data.pixelX / 5;
       }
     },
 
@@ -416,14 +428,23 @@ export default {
       const { headerWrapper, footerWrapper } = this.$refs;
       const refs = this.$refs;
       let self = this;
+      let scrollListerner = this.scrollWrapper
+      if (scrollListerner.nodeName === 'HTML'){
+        scrollListerner = scrollListerner.parentNode
+      }
+      this.debouncedHandleScroll = debounce(30, this.handleScroll);
 
-      this.bodyWrapper.addEventListener('scroll', function () {
-        if (headerWrapper) headerWrapper.scrollLeft = this.scrollLeft;
-        if (footerWrapper) footerWrapper.scrollLeft = this.scrollLeft;
-        if (refs.fixedBodyWrapper) refs.fixedBodyWrapper.scrollTop = this.scrollTop;
-        if (refs.rightFixedBodyWrapper) refs.rightFixedBodyWrapper.scrollTop = this.scrollTop;
-        const maxScrollLeftPosition = this.scrollWidth - this.offsetWidth - 1;
-        const scrollLeft = this.scrollLeft;
+      this.debouncedHandleScrollEl = debounce(30, e => {
+        let that = this
+        if(that.nodeName === '#document'){
+          that = that.documentElement
+        }
+        if (headerWrapper) headerWrapper.scrollLeft = that.scrollLeft;
+        if (footerWrapper) footerWrapper.scrollLeft = that.scrollLeft;
+        if (refs.fixedBodyWrapper) refs.fixedBodyWrapper.scrollTop = that.scrollTop;
+        if (refs.rightFixedBodyWrapper) refs.rightFixedBodyWrapper.scrollTop = that.scrollTop;
+        const maxScrollLeftPosition = that.scrollWidth - that.offsetWidth - 1;
+        const scrollLeft = that.scrollLeft;
         if (scrollLeft >= maxScrollLeftPosition) {
           self.scrollPosition = 'right';
         } else if (scrollLeft === 0) {
@@ -431,7 +452,10 @@ export default {
         } else {
           self.scrollPosition = 'middle';
         }
-      });
+      })
+      scrollListerner.addEventListener('DOMMouseScroll', this.debouncedHandleScroll,false)
+      scrollListerner.addEventListener('scroll', this.debouncedHandleScroll,false)
+      scrollListerner.addEventListener('scroll', this.debouncedHandleScrollEl,false);
 
       if (this.fit) {
         addResizeListener(this.$el, this.resizeListener);
@@ -468,6 +492,67 @@ export default {
       this.layout.updateColumnsWidth();
       //
       // console.log('====================================================')
+    },
+    getData (pageIndex) {
+      if (!pageIndex) {
+        this.tmpCurrentPage = 1
+      }
+      return new Promise(async (resolve, reject) => {
+        const self = this
+        let loadingInstance = Loading.service({ target: self.$el })
+        let readUrl
+        let options
+        try {
+          if (typeof this.dataReadUrl === 'string') {
+            readUrl = this.dataReadUrl
+            options = {
+              params: {
+                pageIndex: this.tmpCurrentPage,
+                pageSize: this.tmpPageSize
+              }
+            }
+          } else if (typeof this.dataReadUrl === 'function') {
+            const result = this.dataReadUrl()
+            readUrl = result[0]
+            options = result[1]
+            options.params = options.params || {}
+            options.params.pageIndex = this.tmpCurrentPage
+            options.params.pageSize = this.tmpPageSize
+          }
+          options.params.pageSize = !options.params.pageSize ? 15 : options.params.pageSize
+          options.params.pageIndex--
+          let res = await axios.get(readUrl, options)
+          if (res.data.status === 0) {
+            self.total = 0
+            self.data.splice(0, self.data.length)
+            loadingInstance.close()
+            reject(res.data.message || `从接口${this.dataReadUrl}获取数据失败 ！`)
+          }
+          if (!res.data.total && res.data.data) {
+            if (res.data.total === 0) {
+              self.total = res.data.total
+            } else if (res.data.data.length > 0 && this.pageSize) {
+              reject(new Error('接口 ' + this.dataReadUrl + ' 没有返回 total ，无法设置数据表格的总记录数！'))
+            }
+          } else {
+            self.total = res.data.total
+          }
+          if (!Array.isArray(res.data.data)) {
+            self.total = 0
+            self.data.splice(0, self.data.length)
+            reject(new Error('接口 ' + this.dataReadUrl + ' 没有返回 data ，无法设置数据表格的数据！'))
+          } else {
+            self.data.splice.apply(self.data, [0, self.data.length].concat(res.data.data))
+            self.afterSortData = [...self.data]
+          }
+          this.$nextTick(() => {
+            loadingInstance.close()
+          })
+          resolve()
+        } catch (e) {
+          loadingInstance.close()
+        }
+      })
     }
   },
 
@@ -481,8 +566,12 @@ export default {
       return this.size || (this.$ELEMENT || {}).size;
     },
 
-    bodyWrapper () {
-      return this.$refs.bodyWrapper;
+    scrollWrapper () {
+      if(this.height){
+        return this.$refs.bodyWrapper;
+      }else{
+        return document.documentElement
+      }
     },
 
     shouldUpdateHeight () {
@@ -635,6 +724,14 @@ export default {
   },
 
   destroyed () {
+    let scrollListerner = this.scrollWrapper
+    if (scrollListerner.nodeName === 'HTML'){
+      scrollListerner = scrollListerner.parentNode
+    }
+    scrollListerner.removeEventListener('DOMMouseScroll', this.debouncedHandleScroll)
+    scrollListerner.removeEventListener('scroll', this.debouncedHandleScroll)
+    scrollListerner.removeEventListener('scroll', this.debouncedHandleScrollEl);
+
     if (this.resizeListener) {
       removeResizeListener(this.$el, this.resizeListener);
     }
@@ -662,6 +759,10 @@ export default {
     });
 
     this.$ready = true;
+    if (this.dataReadUrl && this.autoGetData) {
+      // 当存在dataReadUrl时，从url获取数据，并更新data
+      this.getData(this.tmpCurrentPage)
+    }
   },
 
   data () {
@@ -675,6 +776,7 @@ export default {
       fit: this.fit,
       showHeader: this.showHeader
     });
+    let tmpCurrentPage = this.currentPage || 1
     return {
       layout,
       store,
@@ -687,7 +789,8 @@ export default {
       },
       // 是否拥有多级表头
       isGroup: false,
-      scrollPosition: 'left'
+      scrollPosition: 'left',
+      tmpCurrentPage: tmpCurrentPage,
     };
   }
 };
@@ -695,5 +798,8 @@ export default {
 <style>
   .vue-element-bigdata-table .vue-element-bigdata-table-div > table > tbody > tr > td{
     padding: 0;
+  }
+  .el-table_placeholder{
+    background: linear-gradient(transparent 31px, rgb(235, 238, 245) 32px) 0% 0% / 32px 32px;
   }
 </style>

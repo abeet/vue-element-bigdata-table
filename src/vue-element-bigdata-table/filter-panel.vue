@@ -203,7 +203,7 @@ export default {
   mounted () {
     this.popperElm = this.$el;
     this.referenceElm = this.cell;
-    this.table.bodyWrapper.addEventListener('scroll', () => {
+    this.table.scrollWrapper.addEventListener('scroll', () => {
       this.updatePopper();
     });
 

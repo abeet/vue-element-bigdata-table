@@ -16,7 +16,7 @@ export default {
       /**
        * @description 根据表格容器高度计算内置单个表格（1/3）渲染的行数基础上额外渲染的行数，行数越多表格接替渲染效果越好，但越耗性能
        */
-      appendNum: 15,
+      appendNum: 10,
       // 一块数据显示的数据条数
       itemNum: 0,
       /**
@@ -41,28 +41,36 @@ export default {
       table3Data: [],
       outerWidth: 0, // 外面容器宽度
       groupHeight: {},
-      groupIndex: 0
+      groupIndex: 0,
+      offsetTop: 0 // 在监听整个页面的滚动条事件来更新表格中数据时，要考虑表格在页面中的位置
     };
   },
   methods: {
     //  滚动条拖动
     handleScroll (e) {
-      const ele = e.srcElement || e.target;
-      const { scrollTop, scrollLeft } = ele;
+      let docOrEle = e.srcElement || e.target;
+      let wrapper = docOrEle
+      if(docOrEle.nodeName === '#document'){
+        wrapper = docOrEle.documentElement
+        this.offsetTop = this.$el.getBoundingClientRect().top + wrapper.scrollTop
+      }
+      const { scrollTop, scrollLeft } = wrapper;
       this.scrollLeft = scrollLeft;
       this.scrollTop = scrollTop;
     },
     //  获取高度与数量
     updateHeight () {
-      this.itemNum = Math.ceil(this.height / this.rowHeight) + this.appendNum;
-      this.wrapperHeight = this.$refs.bodyWrapper.offsetHeight;
+      let height = this.height || this.scrollWrapper.clientHeight
+      this.itemNum = Math.ceil(height / this.rowHeight) + this.appendNum;
+      this.wrapperHeight = this.scrollWrapper.offsetHeight;
       this.setTopPlace();
     },
     //
     initGroupHeight (data) {
       //  分组数据
-      let moduleNb = Math.ceil(this.height / this.rowHeight) + this.appendNum;
-      console.log('moduleNb', moduleNb)
+      let height = this.height || this.scrollWrapper.clientHeight
+      let moduleNb = Math.ceil(height / this.rowHeight) + this.appendNum;
+      // console.log('moduleNb每一组的行数', moduleNb)
       let groupHeight = {};
       if (data.length > moduleNb) {
         for (let i in data) {
@@ -80,7 +88,7 @@ export default {
     },
     //  设置顶部定位
     setTopPlace () {
-      let scrollTop = this.scrollTop;
+      let scrollTop = this.scrollTop - this.offsetTop;
       let t0 = 0;
       let t1 = 0;
       let t2 = 0;
@@ -94,7 +102,7 @@ export default {
       this.times0 = t0;
       this.times1 = t1;
       this.times2 = t2;
-      //
+      // console.log(t0, t1, t2)
       let height = 0;
       for (let i in this.groupHeight) {
         if (+i === +this.groupIndex) {
@@ -125,7 +133,7 @@ export default {
         this.updateHeight();
         this.setComputedProps();
         let scrollBarWidth = this.totalRowHeight > this.wrapperHeight ? getScrollbarWidth() : 0;
-        this.outerWidth = this.$refs.bodyWrapper.offsetWidth - 2 - scrollBarWidth;
+        this.outerWidth = this.scrollWrapper.offsetWidth - 2 - scrollBarWidth;
         // let width = this.colWidth * this.columns.length + (this.showIndex ? this.indexWidthInside : 0);
         // this.tableWidth = width > this.outerWidth ? width : this.outerWidth;
         // this.tableWidth = this.fixedWrapperWidth ? this.outerWidth : (width > this.outerWidth ? width : this.outerWidth);
@@ -227,15 +235,18 @@ export default {
       //  当前滚动条是在三个table中的哪一个
       let height = 0;
       //  通过当前上部站位得到三个table最上一个table的是哪个组
-      // let index = 0;
-      for (let i in this.groupHeight) {
-        if (top >= height && top < (height + (this.groupHeight[i] ? this.groupHeight[i] : 0))) {
-          this.groupIndex = +i;
-          break;
+      let index = 0;
+      top = top - this.offsetTop
+      if(top>=0){
+        for (let i in this.groupHeight) {
+          if (top >= height && top < (height + (this.groupHeight[i] ? this.groupHeight[i] : 0))) {
+            index = +i;
+            break;
+          }
+          height += this.groupHeight[i];
         }
-        height += this.groupHeight[i];
       }
-      //
+      this.groupIndex = index
       this.currentIndex = this.groupIndex % 3;
       this.$nextTick(() => {
         this.setTopPlace();
